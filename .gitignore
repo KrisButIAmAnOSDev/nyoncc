@@ -4,3 +4,4 @@ pcc
 *.core
 *.o
 *.s
+tinycc/
