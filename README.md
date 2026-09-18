@@ -1,22 +1,12 @@
 # nyoncc
 
-A C-to-AArch64 cross-compiler I vibe-coded to learn how compiling works. Made for fun.
+A C-to-AArch64 cross-compiler I vibe-coded to learn how compiling works. Made for fun (and pain)
 
-**Vibe code disclaimer**: ~85% LLM, ~15% me. I had no idea how compilers worked before this. I asked an LLM to build one, it built one, I broke it, it fixed it, repeat until it runs `fib(10)`. This is not a serious project — it's a learning toy.
+**disclaimer**: ~85% LLM, ~15% my code. I made this for fun while waiting to rejailbroken my phone and working on deltalator again
 
 ## What it does
 
-Compiles a tiny C subset to AArch64 Linux assembly, then assembles/links/runs under qemu.
-
-## Supported C subset
-
-- Types: `int`, `char`, `void`, pointers
-- Variables: local and global
-- Functions: with parameters and return values
-- Control flow: `if/else`, `while`, `for`, `return`, `break`, `continue`
-- Operators: `+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `&&`, `||`, `!`, `~`, `&`
-- Arrays: basic bracket access (partial)
-- String literals
+Compiles a tiny C subset to AArch64 Linux assembly,that all
 
 ## Build & run
 
@@ -33,6 +23,11 @@ qemu-aarch64 ./input
 - Recursive functions have stack issues (fib returns wrong values)
 - Arrays are partially broken
 - This is a learning experiment, not production software
+- kawkaw is the best
+- also krasei
+- deltarune tomarrow ig
+- dont litteray push everything to github again
+- dont let claude witre an readme again
 
 ## License
 
