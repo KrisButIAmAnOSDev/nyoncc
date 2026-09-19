@@ -20,8 +20,6 @@ qemu-aarch64 ./input
 
 ## Notes
 
-- Recursive functions have stack issues (fib returns wrong values)
-- Arrays are partially broken
 - This is a learning experiment, not production software
 - kawkaw is the best
 - also krasei
