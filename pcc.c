@@ -80,6 +80,7 @@ static int cp;
 
 static Sym *gsym, *lsym;
 static int gvc;
+static int temp_off = 8;
 
 /* ============================================================
  * Lexer
@@ -358,18 +359,17 @@ static Sym *ig(const char *n, Type t) {
     if (lookup(n)) return lookup(n);
     Sym *s = malloc(sizeof(Sym)); s->name=strdup(n); s->ty=t; s->loc=0; s->nx=gsym; gsym=s; return s;
 }
-static Sym *il(const char *n, Type t) {
+static Sym *il(const char *n, Type t, int arr) {
     for (Sym *s=lsym; s; s=s->nx) if (!strcmp(s->name,n)) return s;
-    Sym *s = malloc(sizeof(Sym)); s->name=strdup(n); s->ty=t; s->loc=1; s->off=0; s->nx=lsym; lsym=s; return s;
+    Sym *s = malloc(sizeof(Sym)); s->name=strdup(n); s->ty=t; s->loc=1; s->off=0; s->arr_size=arr; s->nx=lsym; lsym=s; return s;
 }
 
 static Stmt *pd(void) {
     Type t = pty(); Stmt *s = ns(ST_DECL);
     s->decl = malloc(sizeof(Sym)); s->decl->name = strdup(CUR().str);
     s->decl->ty = t; s->decl->off = 0;
-    il(s->decl->name, t); adv();
+    Sym *sym = il(s->decl->name, t, 0); adv();
     if (CUR().type==TK_ASSIGN) { adv(); s->ex = pe(); }
-    else if (CUR().type==TK_LBRACKET) { s->decl->arr_size=CUR().val; adv(); expect(TK_NUM); expect(TK_RBRACKET); }
     expect(TK_SEMICOLON); return s;
 }
 static Stmt *pexp(void) { Stmt *s = ns(ST_EXPR); if (CUR().type!=TK_SEMICOLON) s->ex=pe(); expect(TK_SEMICOLON); return s; }
@@ -429,7 +429,7 @@ static FuncDef *pf2(void) {
             Type pt2 = pty();
             pn=realloc(pn,(pc+1)*sizeof(char*)); pn[pc]=strdup(CUR().str);
             pt=realloc(pt,(pc+1)*sizeof(Type)); pt[pc]=pt2;
-            il(pn[pc],pt2); adv(); pc++;
+            il(pn[pc],pt2,0); adv(); pc++;
             if (CUR().type==TK_COMMA) adv();
         }
     }
@@ -483,7 +483,10 @@ static void gexpr(Expr *e) {
                 fprintf(out,"\tadr\tx0,%s\n",lb); fprintf(out,"\tldr\tx0,[x0]\n");
             } else {
                 int i = flv(e->var->name);
-                if (i >= 0) fprintf(out,"\tldr\tx0,[fp,#%d]\n",lvo[i]);
+                if (i >= 0) {
+                    if (e->var->arr_size > 0) fprintf(out,"\tadd\tx0,x29,#%d\n",lvo[i]);
+                    else fprintf(out,"\tldr\tx0,[x29,#%d]\n",lvo[i]);
+                }
             }
             break;
         case EX_BINOP: {
@@ -500,22 +503,29 @@ static void gexpr(Expr *e) {
                 fprintf(out,"%s:\n",end); break;
             }
             gexpr(e->l);
-            fprintf(out,"\tstr\tx0,[fp,#-16]\n");
+            fprintf(out,"\tstr\tx0,[x29,#-%d]\n",temp_off);
+            temp_off += 8;
             gexpr(e->r);
-            fprintf(out,"\tldr\tx1,[fp,#-16]\n");
-            switch (e->op) {
-                case TK_PLUS: fprintf(out,"\tadd\tx0,x1,x0\n"); break;
-                case TK_MINUS: fprintf(out,"\tsub\tx0,x1,x0\n"); break;
-                case TK_MUL: fprintf(out,"\tmul\tx0,x1,x0\n"); break;
-                case TK_DIV: fprintf(out,"\tsdiv\tx0,x1,x0\n"); break;
-                case TK_MOD: fprintf(out,"\tsdiv\tx3,x1,x0\n\tmsub\tx0,x3,x0,x1\n"); break;
-                case TK_EQ: fprintf(out,"\tcmp\tx1,x0\n\tcset\tx0,eq\n"); break;
-                case TK_NEQ: fprintf(out,"\tcmp\tx1,x0\n\tcset\tx0,ne\n"); break;
-                case TK_LT: fprintf(out,"\tcmp\tx1,x0\n\tcset\tx0,lt\n"); break;
-                case TK_GT: fprintf(out,"\tcmp\tx1,x0\n\tcset\tx0,gt\n"); break;
-                case TK_LEQ: fprintf(out,"\tcmp\tx1,x0\n\tcset\tx0,le\n"); break;
-                case TK_GEQ: fprintf(out,"\tcmp\tx1,x0\n\tcset\tx0,ge\n"); break;
-                default: break;
+            temp_off -= 8;
+            fprintf(out,"\tldr\tx1,[x29,#-%d]\n",temp_off);
+            if(e->l->kind==EX_VAR && e->l->var && e->l->var->arr_size > 0) {
+                fprintf(out,"\tadd\tx0,x1,x0,lsl#3\n");
+                fprintf(out,"\tldr\tx0,[x0]\n");
+            } else {
+                switch (e->op) {
+                    case TK_PLUS: fprintf(out,"\tadd\tx0,x1,x0\n"); break;
+                    case TK_MINUS: fprintf(out,"\tsub\tx0,x1,x0\n"); break;
+                    case TK_MUL: fprintf(out,"\tmul\tx0,x1,x0\n"); break;
+                    case TK_DIV: fprintf(out,"\tsdiv\tx0,x1,x0\n"); break;
+                    case TK_MOD: fprintf(out,"\tsdiv\tx3,x1,x0\n\tmsub\tx0,x3,x0,x1\n"); break;
+                    case TK_EQ: fprintf(out,"\tcmp\tx1,x0\n\tcset\tx0,eq\n"); break;
+                    case TK_NEQ: fprintf(out,"\tcmp\tx1,x0\n\tcset\tx0,ne\n"); break;
+                    case TK_LT: fprintf(out,"\tcmp\tx1,x0\n\tcset\tx0,lt\n"); break;
+                    case TK_GT: fprintf(out,"\tcmp\tx1,x0\n\tcset\tx0,gt\n"); break;
+                    case TK_LEQ: fprintf(out,"\tcmp\tx1,x0\n\tcset\tx0,le\n"); break;
+                    case TK_GEQ: fprintf(out,"\tcmp\tx1,x0\n\tcset\tx0,ge\n"); break;
+                    default: break;
+                }
             }
             break;
         }
@@ -533,7 +543,7 @@ static void gexpr(Expr *e) {
                         fprintf(out,"\tadr\tx0,%s\n",lb);
                     }else{
                         int i=flv(e->l->var->name);
-                        if(i>=0) fprintf(out,"\tadd\tx0,fp,#%d\n",lvo[i]);
+                        if(i>=0) fprintf(out,"\tadd\tx0,x29,#%d\n",lvo[i]);
                     }
                 }
                 break;
@@ -545,9 +555,9 @@ static void gexpr(Expr *e) {
         case EX_CALL: {
             int na = e->nargs; Expr *a[16]; int n = 0;
             Expr *x = e->l; while (x && n < 16) { a[n++] = x; x = x->r; }
-            for (int i = 0; i < na; i++) { gexpr(a[i]); fprintf(out,"\tstr\tx0,[sp,#%d]\n",32+i*8); }
+            for (int i = 0; i < na; i++) { gexpr(a[i]); fprintf(out,"\tstr\tx0,[x29,#%d]\n",48+i*8); }
             int nr = na < 8 ? na : 8;
-            for (int i = 0; i < nr; i++) fprintf(out,"\tldr\tx%d,[sp,#%d]\n",i,32+i*8);
+            for (int i = 0; i < nr; i++) fprintf(out,"\tldr\tx%d,[x29,#%d]\n",i,48+i*8);
             fprintf(out,"\tbl\t%s\n", e->var ? e->var->name : "unknown");
             if (na > 8) fprintf(out,"\tadd\tsp,sp,#%d\n",(na-8)*8);
             break;
@@ -560,7 +570,18 @@ static void gexpr(Expr *e) {
                     fprintf(out,"\tadr\tx1,%s\n",lb); fprintf(out,"\tstr\tx0,[x1]\n");
                 } else {
                     int i = flv(e->l->var->name);
-                    if (i >= 0) fprintf(out,"\tstr\tx0,[fp,#%d]\n",lvo[i]);
+                    if (i >= 0) fprintf(out,"\tstr\tx0,[x29,#%d]\n",lvo[i]);
+                }
+            } else if (e->l->kind==EX_BINOP && e->l->op=='+') {
+                Expr *arr = e->l->l;
+                if (arr->kind==EX_VAR && arr->var && arr->var->arr_size > 0) {
+                    int off = lvo[flv(arr->var->name)];
+                    fprintf(out,"\tmov\tx20,x0\n");
+                    gexpr(e->l->r);
+                    fprintf(out,"\tadd\tx1,x29,#%d\n",off);
+                    fprintf(out,"\tadd\tx0,x1,x0,lsl#3\n");
+                    fprintf(out,"\tmov\tx1,x20\n");
+                    fprintf(out,"\tstr\tx1,[x0]\n");
                 }
             }
             break;
@@ -580,7 +601,7 @@ static void gstmt(Stmt *s, const char *rl, const char *bl, const char *cl) {
                     locsz += s->decl->arr_size * 4;
                 }
                 if (flv(s->decl->name) < 0) alv(s->decl->name, t, off);
-                if (s->ex) { gexpr(s->ex); fprintf(out,"\tstr\tx0,[fp,#%d]\n",off); }
+                if (s->ex) { gexpr(s->ex); fprintf(out,"\tstr\tx0,[x29,#%d]\n",off); }
             }
             break;
         case ST_EXPR: gexpr(s->ex); break;
@@ -615,7 +636,7 @@ static void gstmt(Stmt *s, const char *rl, const char *bl, const char *cl) {
 static void gfunc(FuncDef *f) {
     fprintf(out,"\n\t.global %s\n", f->name);
     fprintf(out,"%s:\n", f->name);
-    locsz = 0; lvc = 0;
+    locsz = 0; lvc = 0; temp_off = 8;
     for (int i = 0; i < f->pc; i++) {
         int off = 32 + i*8;
         alv(f->pns[i], f->pts[i], off);
@@ -624,7 +645,7 @@ static void gfunc(FuncDef *f) {
     fprintf(out,"\tmov\tx29,sp\n");
     for (int i = 0; i < f->pc; i++) {
         int off = 32 + i*8;
-        if (i < 8) fprintf(out,"\tstr\tx%d,[fp,#%d]\n", i, off);
+        if (i < 8) fprintf(out,"\tstr\tx%d,[x29,#%d]\n", i, off);
     }
     char *rl = nl(); gstmt(f->body, rl, NULL, NULL); fprintf(out,"%s:\n", rl);
     fprintf(out,"\tldp\tx29,x30,[sp],#64\n"); fprintf(out,"\tret\n");
