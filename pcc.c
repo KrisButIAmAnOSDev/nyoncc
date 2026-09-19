@@ -369,6 +369,7 @@ static Stmt *pd(void) {
     s->decl = malloc(sizeof(Sym)); s->decl->name = strdup(CUR().str);
     s->decl->ty = t; s->decl->off = 0;
     Sym *sym = il(s->decl->name, t, 0); adv();
+    if (CUR().type==TK_LBRACKET) { adv(); s->decl->arr_size=CUR().val; sym->arr_size=CUR().val; expect(TK_NUM); expect(TK_RBRACKET); }
     if (CUR().type==TK_ASSIGN) { adv(); s->ex = pe(); }
     expect(TK_SEMICOLON); return s;
 }
@@ -596,9 +597,9 @@ static void gstmt(Stmt *s, const char *rl, const char *bl, const char *cl) {
         case ST_DECL:
             if (s->decl) {
                 Type t = s->decl->ty; int off = locsz + 16;
-                locsz += t.ptr ? 8 : (t.kind==0?4:(t.kind==1?1:0));
+                locsz += 8;
                 if (s->decl->arr_size > 0) {
-                    locsz += s->decl->arr_size * 4;
+                    locsz += s->decl->arr_size * 8 - 8;
                 }
                 if (flv(s->decl->name) < 0) alv(s->decl->name, t, off);
                 if (s->ex) { gexpr(s->ex); fprintf(out,"\tstr\tx0,[x29,#%d]\n",off); }
