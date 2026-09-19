@@ -81,6 +81,7 @@ static int cp;
 static Sym *gsym, *lsym;
 static int gvc;
 static int temp_off = 8;
+static char *gvn[512]; static Type gvt[512]; static int garr[512]; static Expr *ginit[512];
 
 /* ============================================================
  * Lexer
@@ -399,7 +400,6 @@ static Stmt *pf(void) { Stmt *s=ns(ST_FOR); adv(); expect(TK_LPAREN);
         if (CUR().type==TK_INT||CUR().type==TK_CHAR||CUR().type==TK_CONST) s->f_init=pd();
         else s->f_init=pexp();
     }
-    expect(TK_SEMICOLON);
     if (CUR().type!=TK_SEMICOLON) s->f_cond=pe();
     expect(TK_SEMICOLON);
     if (CUR().type!=TK_SEMICOLON) s->f_inc=pe();
@@ -419,14 +419,28 @@ static Stmt *ps(void) {
 }
 static FuncDef *pf2(void) {
     Type ret = pty();
-    FuncDef *f = malloc(sizeof(FuncDef)); f->name=strdup(CUR().str); f->rty=ret;
-    f->pc=0; f->pns=NULL; f->pts=NULL; f->nx=NULL;
-    ig(f->name, mt(0,0));
+    if (CUR().type == TK_LPAREN || CUR().type == TK_EOF) return NULL;
+    char *name = strdup(CUR().str);
+    ig(name, mt(0,0));
     { lsym=NULL; }
-    adv(); expect(TK_LPAREN);
+    adv();
+    if (CUR().type != TK_LPAREN) {
+        int arr = 0;
+        if (CUR().type == TK_LBRACKET) {
+            adv(); arr = CUR().val; expect(TK_NUM); expect(TK_RBRACKET);
+        }
+        if (CUR().type == TK_ASSIGN) { adv(); ginit[gvc] = pe(); }
+        else ginit[gvc] = NULL;
+        expect(TK_SEMICOLON);
+        gvn[gvc]=name; gvt[gvc]=ret; garr[gvc]=arr; gvc++;
+        return NULL;
+    }
+    expect(TK_LPAREN);
+    FuncDef *f = malloc(sizeof(FuncDef)); f->name=name; f->rty=ret;
+    f->pc=0; f->pns=NULL; f->pts=NULL; f->nx=NULL;
     int pc=0; char **pn=NULL; Type *pt=NULL;
     if (!(CUR().type==TK_VOID&&CUR().type!=TK_RPAREN)) {
-        while (CUR().type!=TK_RPAREN && CUR().type!=TK_EOF) {
+        while (CUR().type!=TK_RPAREN && CUR().type!=TK_EOF && CUR().type!=TK_LPAREN) {
             Type pt2 = pty();
             pn=realloc(pn,(pc+1)*sizeof(char*)); pn[pc]=strdup(CUR().str);
             pt=realloc(pt,(pc+1)*sizeof(Type)); pt[pc]=pt2;
@@ -439,7 +453,15 @@ static FuncDef *pf2(void) {
 }
 static FuncDef *ppr(void) {
     FuncDef *h=NULL, **tp=&h;
-    while (CUR().type!=TK_EOF) { FuncDef *f=pf2(); *tp=f; tp=&f->nx; }
+    while (CUR().type!=TK_EOF) {
+        FuncDef *f=pf2();
+        if (!f) {
+            if (CUR().type==TK_SEMICOLON) { adv(); continue; }
+            if (CUR().type==TK_LPAREN) break;
+            adv(); continue;
+        }
+        *tp=f; tp=&f->nx;
+    }
     return h;
 }
 
@@ -449,7 +471,6 @@ static FuncDef *ppr(void) {
 static FILE *out;
 static int lblc, lvc, strc, locsz;
 static char *lvn[512]; static Type lvt[512]; static int lvo[512];
-static char *gvn[512]; static Type gvt[512];
 static char *strd[512];
 
 static char *nl(void) { static char b[64]; snprintf(b,sizeof(b),".L%d",lblc++); return strdup(b); }
@@ -556,7 +577,7 @@ static void gexpr(Expr *e) {
         case EX_CALL: {
             int na = e->nargs; Expr *a[16]; int n = 0;
             Expr *x = e->l; while (x && n < 16) { a[n++] = x; x = x->r; }
-            for (int i = 0; i < na; i++) { gexpr(a[i]); fprintf(out,"\tstr\tx0,[x29,#%d]\n",48+i*8); }
+            for (int i = na-1; i >= 0; i--) { gexpr(a[i]); fprintf(out,"\tstr\tx0,[x29,#%d]\n",48+i*8); }
             int nr = na < 8 ? na : 8;
             for (int i = 0; i < nr; i++) fprintf(out,"\tldr\tx%d,[x29,#%d]\n",i,48+i*8);
             fprintf(out,"\tbl\t%s\n", e->var ? e->var->name : "unknown");
@@ -673,8 +694,14 @@ static void compile(FuncDef *p) {
     for (FuncDef *f = p; f; f = f->nx) gfunc(f);
     fprintf(out,"\n\t.section .data\n\t.balign 8\n");
     for (int i = 0; i < gvc; i++) {
-        int sz = gvt[i].ptr ? 8 : (gvt[i].kind==0?4:(gvt[i].kind==1?1:0));
-        fprintf(out,".Ld_%s:\n\t.zero\t%d\n", gvn[i], sz);
+        int esz = gvt[i].ptr ? 8 : (gvt[i].kind==0?4:(gvt[i].kind==1?1:0));
+        int total = garr[i] > 0 ? esz * garr[i] : esz;
+        fprintf(out,".Ld_%s:\n", gvn[i]);
+        if (ginit[i] && ginit[i]->kind == EX_LIT && garr[i] == 0) {
+            fprintf(out,"\t.word\t%d\n", ginit[i]->val);
+        } else {
+            fprintf(out,"\t.zero\t%d\n", total);
+        }
     }
 }
 
